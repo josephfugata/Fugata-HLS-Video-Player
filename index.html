@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HLS Video Player</title>
+    <!-- HLS.js library for non-Safari browsers -->
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+    <style>
+        /* Basic reset and container styling */
+        body,
+        html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #000;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        }
+
+        #videoContainer {
+            position: relative;
+            width: 100%;
+            height: 100%;
+        }
+
+        video {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+
+        /* Overlay for controls */
+        .video-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            flex-direction: column;
+            background-color: rgba(0, 0, 0, 0.5);
+            color: white;
+            z-index: 10;
+        }
+
+        /* Styling for all buttons */
+        .overlay-button {
+            background-color: rgba(30, 30, 30, 0.8);
+            color: white;
+            border: 1px solid rgba(255, 255, 255, 0.5);
+            border-radius: 12px;
+            padding: 15px 30px;
+            font-size: 1.2rem;
+            cursor: pointer;
+            transition: background-color 0.2s ease, transform 0.2s ease;
+            margin: 10px;
+            display: flex;
+            align-items: center;
+        }
+
+        .overlay-button:hover {
+            background-color: rgba(50, 50, 50, 1);
+            transform: scale(1.05);
+        }
+
+        .overlay-button svg {
+            margin-right: 10px;
+            width: 24px;
+            height: 24px;
+        }
+
+        /* Hide elements by default */
+        .hidden {
+            display: none !important;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div id="videoContainer">
+        <!-- The video element -->
+        <video id="videoPlayer" playsinline></video>
+
+        <!-- Overlay for the large "Play" button when paused -->
+        <div id="playOverlay" class="video-overlay hidden">
+            <button id="playButton" class="overlay-button">
+                <svg viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M8 5v14l11-7z"></path>
+                </svg>
+                Play
+            </button>
+        </div>
+
+        <!-- Overlay for the initial "Unmute" button on first visit -->
+        <div id="unmuteOverlay" class="video-overlay hidden">
+            <button id="unmuteButton" class="overlay-button">
+                <svg viewBox="0 0 24 24" fill="currentColor">
+                    <path
+                        d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z">
+                    </path>
+                </svg>
+                Unmute
+            </button>
+        </div>
+
+        <!-- Overlay for returning visitors -->
+        <div id="resumeOverlay" class="video-overlay hidden">
+            <button id="resumeButton" class="overlay-button">
+                <svg viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M8 5v14l11-7z"></path>
+                </svg>
+                Resume from where you left off
+            </button>
+            <button id="restartButton" class="overlay-button">
+                <svg viewBox="0 0 24 24" fill="currentColor">
+                    <path
+                        d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z">
+                    </path>
+                </svg>
+                Watch from beginning
+            </button>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            // --- CONFIGURATION ---
+            const urlParams = new URLSearchParams(window.location.search);
+            const videoSrc = urlParams.get('video');
+
+            if (!videoSrc) {
+                alert("No video source specified. Please provide a 'video' parameter in the iframe src.");
+                throw new Error("Missing 'video' parameter in URL.");
+            }
+
+            const localStorageKey = 'hls-video-timestamp';
+            // -------------------
+
+            const video = document.getElementById('videoPlayer');
+            const videoContainer = document.getElementById('videoContainer');
+
+            // Overlays
+            const playOverlay = document.getElementById('playOverlay');
+            const unmuteOverlay = document.getElementById('unmuteOverlay');
+            const resumeOverlay = document.getElementById('resumeOverlay');
+
+            // Buttons
+            const playButton = document.getElementById('playButton');
+            const unmuteButton = document.getElementById('unmuteButton');
+            const resumeButton = document.getElementById('resumeButton');
+            const restartButton = document.getElementById('restartButton');
+
+            let hls;
+
+            function initializePlayer() {
+                if (Hls.isSupported()) {
+                    hls = new Hls();
+                    hls.loadSource(videoSrc);
+                    hls.attachMedia(video);
+                } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+                    // Native HLS support (e.g., Safari)
+                    video.src = videoSrc;
+                }
+                setupEventListeners();
+                checkVisitorStatus();
+            }
+
+            function checkVisitorStatus() {
+                const lastTimestamp = localStorage.getItem(localStorageKey);
+                if (lastTimestamp && parseFloat(lastTimestamp) > 0) {
+                    // Returning visitor
+                    setupReturningVisit(parseFloat(lastTimestamp));
+                } else {
+                    // First-time visitor
+                    setupFirstVisit();
+                }
+            }
+
+            function setupFirstVisit() {
+                console.log("First time visit setup.");
+                unmuteOverlay.classList.remove('hidden');
+                video.muted = true;
+                video.autoplay = true;
+                // Autoplay can be tricky, so we explicitly call play.
+                video.play().catch(error => {
+                    console.error("Autoplay was prevented:", error);
+                    // If autoplay fails, we still show unmute, but user has to click.
+                });
+            }
+
+            function setupReturningVisit(timestamp) {
+                console.log(`Returning visitor. Resume from ${timestamp}s`);
+                resumeOverlay.classList.remove('hidden');
+                video.currentTime = timestamp;
+                video.autoplay = false;
+                video.muted = false;
+            }
+
+            function startPlayback(fromBeginning = false) {
+                resumeOverlay.classList.add('hidden');
+                if (fromBeginning) {
+                    video.currentTime = 0;
+                }
+                video.muted = false;
+                video.play();
+            }
+
+            function togglePlayPause() {
+                if (video.paused) {
+                    video.play();
+                    playOverlay.classList.add('hidden');
+                } else {
+                    video.pause();
+                    playOverlay.classList.remove('hidden');
+                }
+            }
+
+            function setupEventListeners() {
+                // Unmute button for first-time visit
+                unmuteButton.addEventListener('click', () => {
+                    video.muted = false;
+                    unmuteOverlay.classList.add('hidden');
+                });
+
+                // Resume/Restart for returning visitors
+                resumeButton.addEventListener('click', () => startPlayback(false));
+                restartButton.addEventListener('click', () => startPlayback(true));
+
+                // Click video to toggle play/pause
+                video.addEventListener('click', togglePlayPause);
+
+                // Click the play button overlay to resume
+                playButton.addEventListener('click', togglePlayPause);
+
+                // Save timestamp during playback
+                video.addEventListener('timeupdate', () => {
+                    // Only save if time is meaningful (not 0)
+                    if (video.currentTime > 0) {
+                        localStorage.setItem(localStorageKey, video.currentTime);
+                    }
+                });
+
+                // Clear timestamp when video ends
+                video.addEventListener('ended', () => {
+                    localStorage.removeItem(localStorageKey);
+                });
+            }
+
+            // Start the process
+            initializePlayer();
+        });
+    </script>
+
+</body>
+
+</html>
